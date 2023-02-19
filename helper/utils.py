@@ -6,6 +6,29 @@ from scipy.optimize import linprog
 from qpsolvers import solve_qp
 from typing import Union,  Literal, List #, Sequence
 
+def intersect(A:np.ndarray,B:np.ndarray,C:np.ndarray,D:np.ndarray)->bool:
+    """Check for intersection of line AB with line CD
+
+    Parameters
+    ----------
+    A : np.ndarray
+        Edge of line AB
+    B : np.ndarray
+        Edge of line AB
+    C : np.ndarray
+        Edge of line CD
+    D : np.ndarray
+        Edge of line CD
+
+    Returns
+    -------
+    bool
+        True if intersection occured
+    """
+    def ccw(A,B,C):
+        return (C[1]-A[1])*(B[0]-A[0]) > (B[1]-A[1]) * (C[0]-A[0])
+    return ccw(A,C,D) != ccw(B,C,D) and ccw(A,B,C) != ccw(A,B,D)
+
 def normalize(var: Union[int, float, np.ndarray], 
               var_min: Union[int, float, np.ndarray],
               var_max: Union[int, float, np.ndarray])->Union[int, float, np.ndarray]:
@@ -52,13 +75,13 @@ def rescale(var: Union[int, float, np.ndarray],
     return var
         
 ### Linear Programming
-def linprog(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarray:
+def linprog(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarray:
     """Linear Programming method for calculating cable forces
 
     Parameters
     ----------
-    A : np.ndarray
-        Jacobian Matrix
+    AT : np.ndarray
+        Structure Matrix
     w_e : np.ndarray
         Platform wrench
     f_min : float
@@ -72,11 +95,11 @@ def linprog(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarra
         cable forces
     """
     
-    m = A.shape[0]
+    m = AT.shape[1]
     c = array([[1,1,1]]).T
     A_ub = np.vstack((np.eye(m),-1*np.eye(m)))
     b_ub = array([[f_max]*m+ [-f_min]*m]).T
-    A_eq = A.T
+    A_eq = AT
     b_eq = -1*w_e
     res = linprog(c, A_ub, b_ub, A_eq, b_eq)
     if res.success:
@@ -86,13 +109,13 @@ def linprog(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarra
     return f
 
 ### Quadratic Programming
-def quadprog(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarray:
+def quadprog(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarray:
     """Quadratic Programming method for calculating cable forces
 
     Parameters
     ----------
-    A : np.ndarray
-        Jacobian Matrix
+    AT : np.ndarray
+        Strucuture Matrix
     w_e : np.ndarray
         Platform wrench
     f_min : float
@@ -105,22 +128,22 @@ def quadprog(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarr
     np.ndarray
         cable forces
     """
-    m = A.shape[0]
+    m = AT.shape[1]
     P = np.eye(m)
     q = np.zeros(m)
     G = np.vstack((np.eye(m),-1*np.eye(m)))
     h = array([f_max]*m + [-f_min]*m)
-    f = solve_qp(P,q,G,h,A.T,-1*w_e.ravel(), solver="quadprog")     
+    f = solve_qp(P,q,G,h,AT,-1*w_e.ravel(), solver="quadprog")     
     return f
     
 ### Closed Form Method
-def closed_form_method(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarray:
+def closed_form_method(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarray:
     """Closed Form method for calculating cable forces
 
     Parameters
     ----------
-    A : np.ndarray
-        Jacobian Matrix
+    AT : np.ndarray
+        Structure Matrix
     w_e : np.ndarray
         Platform wrench
     f_min : float
@@ -133,18 +156,18 @@ def closed_form_method(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -
     np.ndarray
         cable forces
     """
-    m = A.shape[0]
+    m = AT.shape[1]
     fm = (f_max + f_min)/2 
-    f = (fm-np.linalg.pinv(A.T)@(w_e+A.T@fm))[:m]
+    f = (fm-np.linalg.pinv(AT)@(w_e+AT@fm))[:m]
     return f
     
-def nearest_corner(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float, p_norm=2 )-> np.ndarray:
+def nearest_corner(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float, p_norm=2 )-> np.ndarray:
     """Nearest Corner method for calculating cable forces when desired wrench is outside the wrench feasible workspace
 
     Parameters
     ----------
-    A : np.ndarray
-        Jacobian Matrix
+    AT : np.ndarray
+        Structure Matrix
     w_e : np.ndarray
         Platform wrench
     f_min : float
@@ -161,11 +184,11 @@ def nearest_corner(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float, p_nor
     """
     
     
-    m,n = A.shape
-    u, s, vh = np.linalg.svd(A.T)
+    n,m = AT.shape
+    u, s, vh = np.linalg.svd(AT)
     H = (vh[1+1:m,:]).T
     h1=H[:,[0]]
-    Ap = np.linalg.pinv(A.T)
+    Ap = np.linalg.pinv(AT)
     f0=-Ap@w_e
     minmax = [f_min,f_max]
     Fcorner = np.zeros((m,2**m))
@@ -187,17 +210,15 @@ def nearest_corner(A:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float, p_nor
         f_valid += Fcorner[:,[i]]*(kw_All_L[i]/kw_l_sum)
     return f_valid
     
-def euler_cromer(x:np.ndarray, x_dot:np.ndarray, x_dot_dot:np.ndarray, Ts:float):
+def euler_cromer(x:np.ndarray, x_dot:np.ndarray, Ts:float):
     """Function for calculating the state of the next timestep using Euler-Cromer method.
 
     Parameters
     ----------
     x : np.ndarray
-        current state
+        state
     x_dot : np.ndarray
-        current state deriviation
-    x_dot_dot : np.ndarray
-        right hand solution of ODE
+        state derivative
     Ts : float
         timestep
 
@@ -206,9 +227,8 @@ def euler_cromer(x:np.ndarray, x_dot:np.ndarray, x_dot_dot:np.ndarray, Ts:float)
     np.ndarray
         new state
     """
-    x_dot = x_dot + x_dot_dot*Ts
     x = x + x_dot*Ts
-    return x, x_dot
+    return x
 
 def create_grid_coordinates(spaces:List[np.ndarray]):
     """Function for meshing coordinate spaces into a grid 
@@ -273,11 +293,11 @@ def calc_static_workspace(
                 
     ws = np.full((coordinates.shape),np.nan)
     forces = np.full((coordinates.shape[0],m),np.nan)
-    for i,coords in coordinates:
+    for i,coords in enumerate(coordinates):
         pose = array([coords]).reshape(cdpr.n,1)
-        A = cdpr.calc_jacobian(pose,m,b,p)
-        if np.linalg.matrix_rank(A.T) == n:
-            f = method(A,w_e,cdpr.f_min,cdpr.f_max)
+        AT = cdpr.calc_structure_matrix(pose,b,p)
+        if np.linalg.matrix_rank(AT) == n:
+            f = method(AT,w_e,cdpr.f_min,cdpr.f_max)
             if (type(f) != type(None)): #and not(np.any(f<=self.f_min) or np.any(f>=self.f_max)):
                 ws[i] = pose.ravel()
                 forces[i] = f.ravel()

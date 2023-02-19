@@ -1,4 +1,5 @@
 #%%
+import itertools
 import numpy as np
 from numpy.linalg import norm
 from typing import Union, List, Dict#, Sequence
@@ -106,16 +107,19 @@ class Platform:
         self.inertia = inertia
         
 class Frame:
-    def __init__(self,attachment_points: np.ndarray) -> None:
+    def __init__(self,
+                 attachment_points: np.ndarray) -> None:
         """A CDPR Frame
 
         Parameters
         ----------
+        vertices : np.array
+            Frame vertex points
         attachment_points : np.ndarray
             Frame cable attachment points
         """
         self.attachment_points = attachment_points
-
+        
 #%% CDPR Special Components
 class PointMass(Platform):
     def __init__(self, mass: float) -> None:
@@ -208,7 +212,6 @@ class CDPR(ABC):
         self.f_m = (self.f_max + self.f_min)/2 # Medium cable force
         self.l_min = cables.l_min
         self.l_max = cables.l_max
-
         self.axes_names = []
         self.rot_axes = []
         self.trans_axes = []
@@ -237,6 +240,7 @@ class CDPR(ABC):
         self.r = self.m - self.n # redundancy
         self.cdpr_type = f"{self.rot_dof}R{self.trans_dof}T"
         self.axes = np.zeros((self.trans_dof,2))
+        self.borders = list(itertools.product(self.axes,self.axes))
         if trans_dof>1:
             self.axes[0,0] = getattr(self, self.trans_axes[0]+"_min")
             self.axes[1,0] = getattr(self, self.trans_axes[1]+"_min")
@@ -278,8 +282,8 @@ class CDPR(ABC):
         return self.m
     
     @abstractmethod
-    def calc_jacobian(self,pose,m,b,p):
-        """Function for calculating the jacobian matrix of specified configuration
+    def calc_structure_matrix(self,pose,b,p)->np.ndarray:
+        """Function for calculating the structure matrix (transposed jacobian) of specified configuration
         
         Returns
         -------
@@ -289,73 +293,52 @@ class CDPR(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def get_jacobian(self):
-        """Function for returning the jacobian matrix of the current configuration.
-        
-        Returns
-        -------
-        np.ndarray
-            jacobian matrix
-        """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def calc_rotmat(self, pose):
+    def calc_rotmat(self, pose:np.ndarray)->np.ndarray:
         """Function for calculating the rotation matrix of specified configuration
-        
+
+        Parameters
+        ----------
+        pose : np.ndarray
+            Pose of platform
+
         Returns
         -------
         np.ndarray
-            rotation matrix .
+            rotation matrix
         """
         raise NotImplementedError
         
     @abstractmethod
-    def get_rotmat(self):
-        """Function for returning the rotation matrix of the current configuration.
-        
+    def calc_mass_matrix(self)->np.ndarray:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def calc_mass_matrix_inverse(self)->np.ndarray:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def calc_cable_lengths(self)->np.ndarray:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def calc_ode(self, M_inv:np.ndarray,  AT:np.ndarray, f:np.ndarray,  w_e:np.ndarray)->np.ndarray:
+        """Function for calculating ode pose_dot_dot = f(M_inv,AT,f,w_e)
+
+        Parameters
+        ----------
+        M_inv : np.ndarray
+            mass matrix inverse
+        AT : np.ndarray
+            structure matrix
+        f : np.ndarray
+            cables forces
+        w_e : np.ndarray
+            external wrench
+
         Returns
         -------
         np.ndarray
-            rotation matrix 
+            pose_dot_dot
         """
         raise NotImplementedError
     
-        
-    @abstractmethod
-    def calc_mass_matrix(self,m_P):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def get_mass_matrix(self):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def calc_mass_matrix_inverse(self,m_P):
-        raise NotImplementedError
-       
-    @abstractmethod
-    def get_mass_matrix_inverse(self):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def calc_ode(self, M_inv:np.ndarray,  A:np.ndarray, f:np.ndarray,  w_e:np.ndarray):
-        """Function for calculating ode pose_dot_dot = f(M_inv,A,f,w_e)
-        
-        Returns
-        -------
-        np.ndarray
-            pose_dot_dot 
-        """
-        raise NotImplementedError
-    
-    @abstractmethod
-    def get_ode(self):
-        """Function for returning current solution of ode pose_dot_dot = f(M_inv,A,f,w_e)
-        
-        Returns
-        -------
-        np.ndarray
-            pose_dot_dot 
-        """
-        raise NotImplementedError

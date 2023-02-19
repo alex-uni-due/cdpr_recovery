@@ -2,6 +2,24 @@ import numpy as np
 from typing import Callable, List, Union    
 from gym.spaces import Space, Box
 
+class Action:
+    def __init__(
+        self,
+        func: Callable,
+        action_space: Union[Space,Callable],
+        description: str) -> None:
+        
+        self.func = func
+        if callable(action_space):
+            self.action_space = lambda cdpr: action_space(cdpr)
+        else:
+            self.action_space = lambda cdpr: action_space
+        self.description = description 
+    def __str__(self) -> str:
+        return str(self.__dict__)
+    def __repr__(self) -> str:
+        return str(self.__dict__)
+    
 def calc_cable_forces(self, action):
     f = self.rescale(action, self.f_min, self.f_max).reshape(self.m,1)
     return f
@@ -21,21 +39,6 @@ def cable_action_space(self):
 def wrench_action_space(self):
     return Box(-1,1,(self.n,))
 
-class Action:
-    def __init__(
-        self,
-        func: Callable,
-        action_space: Union[Space,Callable],
-        description: str) -> None:
-        
-        self.func = func
-        if callable(action_space):
-            self.action_space = lambda self: action_space(self)
-        else:
-            self.action_space = lambda self: action_space
-            
-        self.description = description
-        
         
 cable_forces_action = Action(
     calc_cable_forces,

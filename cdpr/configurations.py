@@ -47,55 +47,37 @@ class CDPR2TPointMass(CDPR):
             w_min=w_min,
             w_max=w_max,
             **kwargs)
-        print(self.rot_axes)
         assert len(self.trans_axes)==2
         assert self.rot_axes == []
         assert self.P is None
         assert self.inertia_P is None
         assert self.B.shape[0]==2
         
-    def calc_jacobian(self,r_p,m,b,p=None):
-        A = np.zeros((m, self.n))
-        for i in range(0, m):
-            l_i = b[:, [i]] - r_p
-            vi = l_i / norm(l_i)
-            A[i, :] = vi.ravel()
-        return A
-    
-    ## Calculate the transposed structure matrix, i.e. the jacobian
-    def get_jacobian(self):
-        return self.calc_jacobian(self.r_p,self.m,self.b)
+    def calc_structure_matrix(self,r_p,b,p=None):
+        l_i = b - r_p
+        AT = l_i/norm(l_i, axis=0)
+        return AT
     
     def calc_rotmat(self, pose):
         return super().calc_rotmat()
     
-    def get_rotmat(self):
-        return super().get_rotmat()
-    
-    def calc_mass_matrix(self,m_P):
+    def calc_mass_matrix(self):
         M = array([[self.m_P, 0], [0, self.m_P]])
         return M
     
-    def calc_mass_matrix_inverse(self,m_P):
-        M_inv = array([[1 / m_P, 0], [0, 1 / m_P]])
-        return M_inv
-    
-    def get_mass_matrix(self):
-        M = array([[self.m_P, 0], [0, self.m_P]])
-        return M
-    
-    def get_mass_matrix_inverse(self):
+    def calc_mass_matrix_inverse(self):
         M_inv = array([[1 / self.m_P, 0], [0, 1 / self.m_P]])
         return M_inv
     
-    def calc_ode(self, M_inv, A, f, w_e):
-        r_p_dot_dot = M_inv@(A.T@f + w_e)
+    def calc_cable_lengths(self, pose,m,b,p):
+        r_p = pose[:self.trans_dof]
+        q = np.array([norm(b[:, [i]] - r_p) for i in range(m)])
+        return q
+    
+    def calc_ode(self, M_inv, AT, f, w_e):
+        r_p_dot_dot = M_inv@(AT@f + w_e)
         return r_p_dot_dot
     
-    ## Calculate a state trasition using Euler-Cromer Integration
-    def get_ode(self):
-        return self.calc_ode(self.get_mass_matrix_inverse(), self.A, self.f, self.w_e())
-
 #%% CDPR Body 2D
 class CDPR1R2T(CDPR):
     def __init__(self,
@@ -122,54 +104,40 @@ class CDPR1R2T(CDPR):
         assert type(self.P) is np.ndarray and self.P.shape[0]==2, "platform attachment points must contained in an array of shape (2,m)"
         assert type(self.inertia_P) in [float,int], f"The platform inertia must be a number (in kg*m**2) not {type(self.inertia_P)}"
         assert self.B.shape[0]==2
-        # Parameters of the CDPR
     
-    def calc_jacobian(self,pose,m,b,p=None):
-        A = np.zeros((m, self.n))
+    def calc_structure_matrix(self,pose,b,p):
         R = self.calc_rotmat(pose)
         r_p = pose[:self.trans_dof]
-        for i in range(0, m):
-            l_i = b[:, [i]] - (r_p+np.dot(R,p[:,[i]]))
-            vi = (l_i / np.linalg.norm(l_i)).ravel()
-            A[i, :-1] = vi.ravel()
-            A[i, -1] = np.cross(p[:,i],vi)
-        return A
-    
-    ## Calculate the transposed structure matrix, i.e. the jacobian
-    def get_jacobian(self):
-        return self.calc_jacobian(self.r_p,self.m,self.b)
+        l_i = b - (r_p+R@p)
+        A1 = l_i/norm(l_i, axis=0)
+        A2 = np.cross(p,A1,axis=0)
+        AT = np.vstack((A1,A2))
+        return AT
     
     def calc_rotmat(self, pose):
-        phi = pose[-1]
+        phi = pose[-1,0]
         R = np.array([[np.cos(phi), -np.sin(phi)],
                       [np.sin(phi), np.cos(phi)]])
         return R
     
-    def get_rotmat(self):
-        return self.calc_rotmat(self.pose)
-    
-    def calc_mass_matrix(self,m_P,inertia_P):
-        M = np.array([[ m_P, 0, 0], 
-                      [0, m_P,0],
-                      [0, 0, inertia_P]])
+    def calc_mass_matrix(self):
+        M = np.array([[ self.m_P, 0, 0], 
+                      [0, self.m_P,0],
+                      [0, 0, self.inertia_P]])
         return M
     
-    def calc_mass_matrix_inverse(self,m_P,inertia_P):
-        M_inv = np.array([[1 / m_P, 0, 0], 
-                          [0, 1 / m_P,0],
-                          [0, 0, 1/inertia_P]])
+    def calc_mass_matrix_inverse(self):
+        M_inv = np.array([[1/self.m_P, 0, 0], 
+                          [0, 1/self.m_P,0],
+                          [0, 0, 1/self.inertia_P]])
         return M_inv
     
-    def get_mass_matrix(self):
-        return self.calc_mass_matrix(self.m_P,self.inertia_P)
+    def calc_cable_lengths(self, pose,m,b,p):
+        R = self.calc_rotmat(pose)
+        r_p = pose[:self.trans_dof]
+        q = np.array([norm(b[:, [i]] - (r_p+R@p[:,[i]])) for i in range(m)])
+        return q
     
-    def get_mass_matrix_inverse(self):
-        return self.calc_mass_matrix_inverse(self.m_P,self.inertia_P)
-    
-    def calc_ode(self, M_inv, A, f, w_e):
-        pose_dot_dot = M_inv@(A.T@f + w_e)
+    def calc_ode(self, M_inv, AT, f, w_e):
+        pose_dot_dot = M_inv@(AT@f + w_e)
         return pose_dot_dot
-    
-    ## Calculate a state trasition using Euler-Cromer Integration
-    def get_ode(self):
-        return self.calc_ode(self.get_mass_matrix_inverse(), self.A, self.f, self.w_e())
