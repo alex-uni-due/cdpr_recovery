@@ -32,6 +32,8 @@ cable_force_gradients = StateVariable("cable_force_gradients","delta_f", "[N]", 
 wrench = StateVariable("wrench","w", "[N|N/m]", "platform wrench", np.ndarray, "n")
 external_wrench = StateVariable("external_wrench","w_e", "[N|N/m]", "platform wrench", np.ndarray, "n")
 
+steps = StateVariable("steps","steps", "", "number of timesteps", int, 1)
+intergrated_error = StateVariable("intergrated_error", "I","", "intergrated error", float, 1)
 # jacobian = StateVariable("jacobian","A", "[]", "jacobian matrix", np.ndarray, "(self.n,self.m)")
 # rotation_matrix = StateVariable("rotation_matrix", "R", "[]", "rotatation matrix", np.ndarray, "(self.trans_dot, self.trans_dof)")
 # mass_matrix = StateVariable("mass_matrix", "M", "[]", np.ndarray, "(self.trans_dot, self.trans_dof))")

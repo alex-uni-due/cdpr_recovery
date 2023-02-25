@@ -7,7 +7,7 @@ from cdpr.cdpr import *
 from environment.rewards import *
 from environment.observations import *
 from environment.actions import *
-from helper.utils import *
+from cdpr.utils import *
 #%%
 class Task:
     def __init__(self,
@@ -67,7 +67,7 @@ class EmergencyStrategyCDPR(Env):
     
     def __init__(self, 
                  cdpr: CDPR,
-                 cables_idx: list, # list of cables indeces to be used in simulation
+                 cables_idx: List[int], # list of cables indeces to be used in simulation
                  Ts: float, # timestep intervall
                  coordinates: np.ndarray, # coordinate grid for workspace calculation and initialization
                  observation: Observation,
@@ -80,7 +80,7 @@ class EmergencyStrategyCDPR(Env):
         # Parameters of the CDPR
         self.CDPR = cdpr
         self.cables_idx = cables_idx
-        self.default_cables_idx = [i for i in range(len(self.default_cables))]
+        self.default_cables_idx = list(cdpr.cables.index_mapping.keys())
         self.m = len(cables_idx)
         self.b = self.B[:,self.cables_idx] # remaining anchor points
         if self.P is None:
@@ -89,8 +89,8 @@ class EmergencyStrategyCDPR(Env):
             self.p = self.P[:,self.cables_idx] # remaining anchor points
         self.Ts = Ts # timestep
         self.coordinates = coordinates
-        self.ws_full, self.ws_full_forces = calc_static_workspace(self, self.default_cables_idx, coordinates)
-        self.ws_rem, self.ws_rem_forces = calc_static_workspace(self, self.cables_idx, coordinates)
+        self.ws_full, self.ws_full_forces = calc_static_workspace(self, coordinates, self.default_cables_idx)
+        self.ws_rem, self.ws_rem_forces = calc_static_workspace(self, coordinates, self.cables_idx)
         not_ws = set(list(map(tuple, self.ws_full))).difference(set(list(map(tuple, self.ws_rem))))
         self.not_ws = array(list(not_ws))   
         for arg_name, arg_value in kwargs.items():
@@ -113,7 +113,7 @@ class EmergencyStrategyCDPR(Env):
             del self.phi_dot
             del self.phi_dot_dot
             del self.omega 
-            del self.omega_dot
+            del self.alpha
             del self.orientation
             del self.angular_velocity
             del self.acceleration_vector
@@ -123,23 +123,27 @@ class EmergencyStrategyCDPR(Env):
             del self.rotation_matrix
             
         # Observation Space
-        self.observation = observation
+        self.obs = observation
         self._add_obs_limits()
         self.get_obs = lambda: observation.func(self)
         self.observation_space = observation.observation_space
         
+        self.act = action
         self.get_cable_foces = lambda act: action.func(self, act)
         self.action_space = action.action_space(self)
+        self.rew = reward
         self.get_reward = lambda: reward.func(self)
+        self.task = task
         self.is_success = lambda: task.is_success(self)
         self.is_failure = lambda: task.is_failure(self)
         self.is_timeout = lambda: task.is_timeout(self)
-        
+    
     def _add_obs_limits(self):
-        low = self.observation.low
-        high = self.observation.high
+        """Adds limits variable names and their limits as attributes"""
+        low = self.obs.low
+        high = self.obs.high
         i = 0
-        for var in self.observation.variables:
+        for var in self.obs.variables:
             if var.dtype==float or var.dtype==int:
                 var_min = low[i]
                 var_max = high[i]
@@ -154,7 +158,7 @@ class EmergencyStrategyCDPR(Env):
                 setattr(self, f"{var.symbol}_max", var_max)
                 i+=size
                 
-            
+    # Function for accessing cdpr attrs        
     def __getattr__(self, attr):
         return getattr(self.CDPR, attr)
     
@@ -170,12 +174,33 @@ class EmergencyStrategyCDPR(Env):
     def get_ode(self):
         return self.CDPR.calc_ode(self.M_inv, self.AT, self.f, self.w_e)
     
+    def set_action(self, action:Action):
+        self.get_cable_foces = lambda act: action.func(self, act)
+        self.action_space = action.action_space(self)
+        
+    def set_observation(self, observation:Observation):
+        self.obs = observation
+        self._add_obs_limits()
+        self.get_obs = lambda: observation.func(self)
+        self.observation_space = observation.observation_space
+        
+    def set_reward(self, reward:Reward):
+        self.get_reward = lambda: reward.func(self)
+        
+    def set_task(self, task:Task):
+        self.is_success = lambda: task.is_success(self)
+        self.is_failure = lambda: task.is_failure(self)
+        self.is_timeout = lambda: task.is_timeout(self)
+        
     ## Apply action to environment and observe new state and reward
     def step(self, action):
         self.steps += 1
-        # Save previous states
-        self.pose_prev = self.pose
+        # Save previous states and actions for potential use with gradient functions
+        self.state_prev = self.state
         self.action_prev = self.action
+        self.pose_prev = self.pose
+        self.pose_dot_prev = self.pose_dot
+        self.pose_dot_dot_prev = self.pose_dot_dot
         self.f_prev = self.f
         
         # Update states and actions
@@ -200,19 +225,20 @@ class EmergencyStrategyCDPR(Env):
         self.timeout = self.is_timeout()
         return self.success or self.failure or self.timeout
     
-    def get_action(self):
-        return rescale(self.f, self.f_min, self.f_max)
-        
     def get_state(self):
         state = []
         for i, var in enumerate(self.state):
-            var_min = self.observation.low[i]
-            var_max = self.observation.high[i]
+            var_min = self.obs.low[i]
+            var_max = self.obs.high[i]
             var = rescale(var, var_min, var_max)
             state.append(var)
-        return array(state)
+        state = array(state)
+        return state
     
-    def reset(self,pose = None, pose_dot = None, pose_dot_dot=None, f=None):
+    def reset(self,pose = None, 
+              pose_dot = None, 
+              pose_dot_dot=None, 
+              f=None):
         
         if pose is None:
            start_idx = np.random.randint(0, self.ws_full.shape[0])
@@ -243,7 +269,7 @@ class EmergencyStrategyCDPR(Env):
             self.f_0 = (quadprog(AT,self.w_e, self.f_min, self.f_max)[self.cables_idx]).reshape(self.m, 1)
         else:
             self.f_0 = f
-        
+            
         self.f_prev = self.f_0
         self.f = self.f_prev
         
@@ -252,6 +278,7 @@ class EmergencyStrategyCDPR(Env):
         self.action = self.action_prev
         
         self.state = self.get_obs()
+        self.state_prev = self.state
         self.done = False
         self.success = False
         self.failure = False

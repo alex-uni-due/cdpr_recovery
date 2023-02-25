@@ -82,21 +82,33 @@ def test_coordinates(cdpr, model, coordinates, save_freq=1, max_timesteps=10000)
                      "start_end":start_end}
     return test_data
 
-def continutiy_cost(forces, f_min, f_max):
-    cost = np.diff(forces)**2/(f_max-f_min)
-    return cost
+def continuity_cost(a, a_min, a_max):
+    cost = 100*(np.abs(np.diff(a,axis=0))/(a_max-a_min))
+    cost_mean = np.mean(cost)
+    return cost_mean
 
-def evaluate_trajectory(poses, velocities, accelerations, forces):
+def find_final_threshold_index(signal, threshold):
+    idx = len(signal)
+    check_if_under_threshold = True
+    for i, value in enumerate(signal):
+        if check_if_under_threshold:
+            if abs(value) <= threshold:
+                check_if_under_threshold = False
+                idx = i
+        else:
+            if abs(value) >threshold:
+                idx = len(signal)
+                check_if_under_threshold = True
+    return idx
+
+def evaluate_translation_trajectory(positions, velocities, accelerations):
     jerk = np.diff(accelerations, axis=0)
     rms_jerk = np.sqrt(np.mean(np.square(jerk)))
     max_velocity = np.max(velocities)
     rms_velocity = np.sqrt(np.mean(np.square(velocities)))
-    trajectory_length = np.sum(np.sqrt(np.sum(np.diff(poses, axis=0)**2, axis=1)))
-    trajectory_distance = np.linalg.norm(poses[-1]-poses[0])
+    trajectory_length = np.sum(np.sqrt(np.sum(np.diff(positions, axis=0)**2, axis=1)))
+    trajectory_distance = np.linalg.norm(positions[-1]-positions[0])
     relative_length = trajectory_length/trajectory_distance
-    rms_forces = np.sqrt(np.mean(np.square(forces)))
-    max_forces = np.max(forces)
-    max_velocities = np.max(velocities)
     metrics = {
         "rms_jerk": rms_jerk,
         "max_velocity": max_velocity,
@@ -104,14 +116,50 @@ def evaluate_trajectory(poses, velocities, accelerations, forces):
         "trajectory_length": trajectory_length,
         "trajectory_distance": trajectory_distance,
         "relative_length": relative_length,
-        "rms_forces": rms_forces,
-        "max_forces": max_forces,
-        "max_velocities": max_velocities
     }
     return metrics
 
-def save_results(test_data, savedir):
-    df = pd.DataFrame(test_data)
-    excel_path = os.path.join(savedir, "CDPR.xlsx")
-    with pd.ExcelWriter(excel_path) as writer:
-        df.to_excel(writer, sheet_name= "test",engine="xlsxwriter")
+def evaluate_force_trajectory(forces):
+    rms_forces = np.sqrt(np.mean(np.square(forces)))
+    max_force_delta = np.max(np.diff(forces, axis=0))
+    max_force = np.max(forces)
+    metrics = {
+        "rms_forces": rms_forces,
+        "max_force": max_force,
+        "max_force_delta": max_force_delta,
+    }
+    return metrics
+
+def evaluate_rotation_trajectory(orientations, angular_velocities, angular_accelerations):
+    jerk = np.diff(angular_accelerations, axis=0)
+    rms_jerk = np.sqrt(np.mean(np.square(jerk)))
+    max_velocity = np.max(angular_velocities)
+    rms_velocity = np.sqrt(np.mean(np.square(angular_velocities)))
+    total_rotation = np.sum(np.sqrt(np.sum(np.diff(orientations, axis=0)**2, axis=1)))
+    metrics = {
+        "rms_jerk": rms_jerk,
+        "max_velocity": max_velocity,
+        "rms_velocity": rms_velocity,
+        "total_rotation":total_rotation
+    }
+    return metrics
+
+def average_distance_to_centroid(safe_positions):
+    """
+    Calculates the average distance to centroid for a set of safe positions.
+    :param safe_positions: A numpy array of shape (n, d) containing n safe positions in d dimensions.
+    :return: The average distance to centroid.
+    """
+    if len(safe_positions)==0:
+        return 0.
+    
+    # Calculate the centroid
+    centroid = np.mean(safe_positions, axis=0)
+
+    # Calculate the distances to centroid
+    distances = np.sqrt(np.sum((safe_positions - centroid)**2, axis=1))
+
+    # Calculate the average distance to centroid
+    avg_distance = np.mean(distances)
+
+    return avg_distance

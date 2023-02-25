@@ -104,7 +104,7 @@ class CDPR1R2T(CDPR):
         assert type(self.P) is np.ndarray and self.P.shape[0]==2, "platform attachment points must contained in an array of shape (2,m)"
         assert type(self.inertia_P) in [float,int], f"The platform inertia must be a number (in kg*m**2) not {type(self.inertia_P)}"
         assert self.B.shape[0]==2
-    
+        self.P = self.P[:,list(self.cables.index_mapping.values())]
     def calc_structure_matrix(self,pose,b,p):
         R = self.calc_rotmat(pose)
         r_p = pose[:self.trans_dof]

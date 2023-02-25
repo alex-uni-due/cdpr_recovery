@@ -2,10 +2,11 @@
 import itertools
 import numpy as np
 from numpy import array
-from scipy.optimize import linprog
+from numpy.linalg import norm, matrix_rank, svd, pinv
+from scipy.optimize import linprog as lp
 from qpsolvers import solve_qp
 from typing import Union,  Literal, List #, Sequence
-
+from cdpr.cdpr import CDPR
 def intersect(A:np.ndarray,B:np.ndarray,C:np.ndarray,D:np.ndarray)->bool:
     """Check for intersection of line AB with line CD
 
@@ -101,7 +102,7 @@ def linprog(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) -> np.ndarr
     b_ub = array([[f_max]*m+ [-f_min]*m]).T
     A_eq = AT
     b_eq = -1*w_e
-    res = linprog(c, A_ub, b_ub, A_eq, b_eq)
+    res = lp(c, A_ub, b_ub, A_eq, b_eq)
     if res.success:
         f = res.x
     else:
@@ -158,7 +159,7 @@ def closed_form_method(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float) 
     """
     m = AT.shape[1]
     fm = (f_max + f_min)/2 
-    f = (fm-np.linalg.pinv(AT)@(w_e+AT@fm))[:m]
+    f = (fm-pinv(AT)@(w_e+AT@fm))[:m]
     return f
     
 def nearest_corner(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float, p_norm=2 )-> np.ndarray:
@@ -183,12 +184,11 @@ def nearest_corner(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float, p_no
         cable forces
     """
     
-    
     n,m = AT.shape
-    u, s, vh = np.linalg.svd(AT)
+    u, s, vh = svd(AT)
     H = (vh[1+1:m,:]).T
     h1=H[:,[0]]
-    Ap = np.linalg.pinv(AT)
+    Ap = pinv(AT)
     f0=-Ap@w_e
     minmax = [f_min,f_max]
     Fcorner = np.zeros((m,2**m))
@@ -197,7 +197,7 @@ def nearest_corner(AT:np.ndarray, w_e:np.ndarray, f_min:float, f_max:float, p_no
     for i in range(2**m):
         Fcorner[:,i] = array((F1.flat[i],F2.flat[i],F3.flat[i]))
         Ftemp = f0 + (((Fcorner[:,[i]] - f0).T@h1/(h1.T@h1))*h1)
-        LTemp=np.linalg.norm(Fcorner[:,[i]]-Ftemp)
+        LTemp= norm(Fcorner[:,[i]]-Ftemp)
         All_L[i]=LTemp
     l_sum=np.sum(All_L)
     kw_All_L=np.zeros((2**m,1))
@@ -246,15 +246,15 @@ def create_grid_coordinates(spaces:List[np.ndarray]):
     dim1 = len(spaces)
     grid_coordinates = np.zeros((dim0,dim1))
     for i,coords in enumerate(itertools.product(*spaces)):
-        coords = np.array(coords)
+        coords = array(coords)
         grid_coordinates[i] = coords.ravel()
     return grid_coordinates
 
 # Static Workspace Calculation (WS) on discrete arrays
 def calc_static_workspace(
-    cdpr,
-    cables_idx:list, 
-    coordinates:np.ndarray,
+    cdpr: CDPR,
+    coordinates: np.ndarray,
+    cables_idx: Union[List[int],None] = None,
     method: Literal["lp","qp","cfm"] = "qp") -> np.ndarray:
 
     """Method for calculating coordinates of the static workspace
@@ -263,10 +263,10 @@ def calc_static_workspace(
     ----------
     cdpr: CDPR
         An instance of a CDPR Class
-    cables_idx : list
-        List of remaining cables that will used for WS calculation
     coordinates : int
         coordinates that will be checked
+    cables_idx : list
+        List of remaining cables that will used for WS calculation
     method : Literal["lp","qp","cfm"], optional
         Method that is used to calculate valid cable forces with, by default "qp"\n
         -"lp"  = Linear Programming\n
@@ -286,6 +286,8 @@ def calc_static_workspace(
     except TypeError:
         p = None
     n = cdpr.n
+    if cables_idx == None:
+        cables_idx = list(cdpr.cables.index_mapping.keys())
     m = len(cables_idx)
     method = {"cfm": closed_form_method, 
               "qp": quadprog, 
@@ -296,9 +298,9 @@ def calc_static_workspace(
     for i,coords in enumerate(coordinates):
         pose = array([coords]).reshape(cdpr.n,1)
         AT = cdpr.calc_structure_matrix(pose,b,p)
-        if np.linalg.matrix_rank(AT) == n:
+        if matrix_rank(AT) == n:
             f = method(AT,w_e,cdpr.f_min,cdpr.f_max)
-            if (type(f) != type(None)): #and not(np.any(f<=self.f_min) or np.any(f>=self.f_max)):
+            if (type(f) != type(None)):
                 ws[i] = pose.ravel()
                 forces[i] = f.ravel()
     ws = ws[ ~np.isnan(ws).any(axis=1),:]

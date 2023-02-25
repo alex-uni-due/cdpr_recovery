@@ -1,6 +1,7 @@
 #%%
 import itertools
 import numpy as np
+from numpy import array
 from numpy.linalg import norm
 from typing import Union, List, Dict#, Sequence
 from abc import ABC, abstractmethod
@@ -85,65 +86,83 @@ class Cables:
 class Platform:
     def __init__(self,
                  mass: float,
+                 corners: Union[np.ndarray,None],
                  attachment_points: Union[np.ndarray,None],
-                 inertia: Union[np.ndarray,float, None]) -> None:
+                 inertia: Union[np.ndarray,float, None],
+                 **kwargs
+                 ) -> None:
         """A CDPR platform
 
         Parameters
         ----------
         mass : float
             Mass of the paltform in [kg]
-       attachment_points : Union[np.ndarray,None]
-            Platform cable attachment points. If None the platform is considered to be a pointmass.
+        corners : Union[np.ndarray,None]
+            Platform corner points in platform coordinates with shape:(N_axes,M_corners)
+        attachment_points : Union[np.ndarray,None]
+            Platform cable attachment points with shape:(N_axes,M_attachment_points). If None the platform is considered to be a pointmass.
         inertia : Union[np.ndarray,float, None]
             Inertia of the platform. If None the platform is considered to be a pointmass.
         """
         self.mass = mass
+        self.corners = corners
         if attachment_points is None:
             assert inertia is None, f"The intertia cannot be {inertia} if P is None"
         if inertia is None:
             assert attachment_points is None, f"The attachment points cannot be {attachment_points} if the inertia is None"
         self.attachment_points = attachment_points
         self.inertia = inertia
-        
+        for arg, val in kwargs.items():
+            setattr(self,arg,val)
 class Frame:
     def __init__(self,
-                 attachment_points: np.ndarray) -> None:
+                 corners: np.ndarray,
+                 attachment_points: np.ndarray,
+                 **kwargs) -> None:
         """A CDPR Frame
 
         Parameters
         ----------
-        vertices : np.array
-            Frame vertex points
+        corners : np.ndarray
+            Frame corner points with shape:(N_axes,M_corners)
         attachment_points : np.ndarray
-            Frame cable attachment points
+            Frame cable attachment points with shape:(N_axes,M_attachment_points)
         """
+        self.corners = corners
         self.attachment_points = attachment_points
+        for arg, val in kwargs.items():
+            setattr(self,arg,val)
         
 #%% CDPR Special Components
 class PointMass(Platform):
-    def __init__(self, mass: float) -> None:
-        super().__init__(mass, attachment_points=None, inertia=None)
+    def __init__(self, mass: float,
+                 **kwargs) -> None:
+        super().__init__(mass, corners=None, attachment_points=None, inertia=None,
+                 **kwargs)
 
 class Body2D(Platform):
-    def __init__(self, mass: float, attachment_points: np.ndarray, inertia: float) -> None:
-        super().__init__(mass, attachment_points, inertia)
+    def __init__(self, mass: float, corners:np.ndarray, attachment_points: np.ndarray, inertia: float,
+                 **kwargs) -> None:
+        super().__init__(mass, corners, attachment_points, inertia,
+                 **kwargs)
         
 class Body3D(Platform):
-    def __init__(self, mass: float, attachment_points: np.ndarray, inertia: np.ndarray) -> None:
-        super().__init__(mass, attachment_points, inertia)
+    def __init__(self, mass: float, corners:np.ndarray, attachment_points: np.ndarray, inertia: np.ndarray,
+                 **kwargs) -> None:
+        super().__init__(mass, corners, attachment_points, inertia,
+                 **kwargs)
         
 class RotationalAxisX(RotationalAxis):
     def __init__(self) -> None:
-        super().__init__(name="x", rotation_symbol="psi")
+        super().__init__(name="x", rotation_symbol="PHI")
 
 class RotationalAxisY(RotationalAxis):
     def __init__(self) -> None:
-        super().__init__(name="y", rotation_symbol="theta")
+        super().__init__(name="y", rotation_symbol="THETA")
 
 class RotationalAxisZ(RotationalAxis):
     def __init__(self) -> None:
-        super().__init__(name="z", rotation_symbol="psi")
+        super().__init__(name="z", rotation_symbol="PSI")
 
 class TranslationalAxisX(TranslationalAxis):
     def __init__(self, min:float, max:float) -> None:
@@ -200,8 +219,7 @@ class CDPR(ABC):
         self.platform = platform
         self.B = frame.attachment_points
         self.P = platform.attachment_points
-        self.cables = cables.index_mapping
-        self.default_cables = list(cables.index_mapping.keys())
+        self.cables = cables
         self.m_P = platform.mass 
         self.inertia_P = platform.inertia
         self.w_e = w_e
@@ -213,14 +231,16 @@ class CDPR(ABC):
         self.l_min = cables.l_min
         self.l_max = cables.l_max
         self.axes_names = []
+        self.pose_variables = []
         self.rot_axes = []
         self.trans_axes = []
         for axis in coordinate_system.axes: 
-            if axis.name not in self.axes_names:
-                self.axes_names.append(axis.name) 
             if isinstance(axis, RotationalAxis):
+                self.pose_variables.append(axis.rotation_symbol)
                 self.rot_axes.append(axis.name)
             elif isinstance(axis, TranslationalAxis):
+                self.pose_variables.append(axis.name)
+                self.axes_names.append(axis.name) 
                 self.trans_axes.append(axis.name)
                 setattr(self, f"{axis.name}_min", axis.min)
                 setattr(self, f"{axis.name}_max", axis.max)
@@ -236,11 +256,19 @@ class CDPR(ABC):
            assert rot_dof == 0, "rot_dof cannot be greater than 0 if the platform is a pointmass"
 
         self.n = self.trans_dof + self.rot_dof # Degrees of freedom (dof)
-        self.m = len(self.cables) # number of cables
+        self.m = len(self.cables.index_mapping) # number of cables
         self.r = self.m - self.n # redundancy
         self.cdpr_type = f"{self.rot_dof}R{self.trans_dof}T"
         self.axes = np.zeros((self.trans_dof,2))
-        self.borders = list(itertools.product(self.axes,self.axes))
+        if trans_dof==2:
+            self.borders = [[array([self.axes[0,0], self.axes[1,0]]),
+                            array([self.axes[0,0], self.axes[1,1]])],
+                            [array([self.axes[0,0], self.axes[1,1]]),
+                            array([self.axes[0,1], self.axes[1,1]])],
+                            [array([self.axes[0,1], self.axes[1,1]]),
+                            array([self.axes[0,1], self.axes[1,0]])],
+                            [array([self.axes[0,1], self.axes[1,0]]),
+                            array([self.axes[0,0], self.axes[1,0]])]]
         if trans_dof>1:
             self.axes[0,0] = getattr(self, self.trans_axes[0]+"_min")
             self.axes[1,0] = getattr(self, self.trans_axes[1]+"_min")

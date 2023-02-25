@@ -8,12 +8,11 @@ from qpsolvers import solve_qp
 from scipy.optimize import minimize
 from scipy.optimize import linprog
 from environment.environment import EmergencyStrategyCDPR
-from helper.utils import normalize, rescale, quadprog, nearest_corner
+from cdpr.utils import normalize, rescale, quadprog, nearest_corner
 from collections import namedtuple
 from dataclasses import dataclass, field
 from enum import Enum
 from torch import nn as nn
-
 
 class RLAgent:
     sac_sde_config = dict(
@@ -52,10 +51,10 @@ class RLAgent:
     
     def __init__(self,
                  env, 
-                 algo,
-                 seed,
-                 sde,
-                 n_envs) -> None:
+                 algo="TQC",
+                 seed=1,
+                 sde=False,
+                 n_envs=1) -> None:
         
         self.env = env
         self.algo = algo
@@ -63,10 +62,10 @@ class RLAgent:
         self.sde = sde
         self.n_envs = n_envs
         
-        vec_env = make_vec_env(lambda: env,
-                               seed = seed,
-                               monitor_kwargs=dict(info_keywords=("is_success",)),
-                               n_envs=n_envs)
+        self.vec_env = make_vec_env(lambda: env,
+                                    seed = seed,
+                                    monitor_kwargs=dict(info_keywords=("is_success",)),
+                                    n_envs=n_envs)
         
         if sde == True:
             if algo in ["SAC", "TQC"]:
@@ -75,7 +74,7 @@ class RLAgent:
                 self.config = self.ppo_sde_config
                 
         self.model = algo('MlpPolicy',
-                     vec_env, 
+                     self.vec_env, 
                      device='cuda',
                      verbose=0, 
                      **self.config)
@@ -152,7 +151,7 @@ class PotentialFieldAgent:
         self.F_D = -D_p*r_p_dot.ravel()
         self.F_att = F_att
         self.F_rep = F_rep
-        self.w_pot = self.w.ravel() - (self.F_att + self.F_rep + self.F_D)
+        self.w_pot = (self.F_att + self.F_rep + self.F_D)
         return self.w_pot
         
     def get_cable_forces(self):
@@ -162,9 +161,9 @@ class PotentialFieldAgent:
     ### cable forces with potential field
     def calc_cable_forces(self,w_pot):
         cdpr = self.cdpr
-        f = quadprog(cdpr.A, w_pot, cdpr.f_min, cdpr.f_max)
+        f = quadprog(cdpr.A, cdpr.w_e-w_pot, cdpr.f_min, cdpr.f_max)
         if f is None:
-            f = nearest_corner(self.A, w_pot, cdpr.f_min, cdpr.f_max, self.p_norm)
+            f = nearest_corner(self.A, cdpr.w_e-w_pot, cdpr.f_min, cdpr.f_max, self.p_norm)
         return f.reshape(self.m, 1)
     
     def predict(self, obs):
@@ -224,13 +223,13 @@ class PotentialFieldAgentOld(PotentialFieldAgent):
         self.G = np.zeros((2*self.m,self.n+self.m+1))
         self.G[:,self.n:-1] = np.vstack((np.eye(3),-np.eye(3)))
 
-        h = np.array([self.f_max]*self.m+[-self.f_min]*self.m)
+        h = np.array([self.cdpr.f_max]*self.m+[-self.cdpr.f_min]*self.m)
         A = np.vstack((np.hstack((np.eye(2),self.A.T, np.zeros((self.n,1)))),np.array([[0]*(self.n+self.m)+[1]])))
-        b = np.hstack([-self.w_pot,self.fm])
+        b = np.hstack([-self.w_pot,(self.cdpr.f_max+self.cdpr.f_min)/2])
         opt = solve_qp(self.P,self.q,self.G,h,A,b)
         f = opt[self.n:self.n+self.m]
         if normalized:
-            return self.scale(f.ravel(), self.f_min, self.f_max)
+            return self.scale(f.ravel(), self.cdpr.f_min, self.cdpr.f_max)
         else:
             return f
     
