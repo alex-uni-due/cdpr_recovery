@@ -1,10 +1,7 @@
+import math
 import numpy as np
 import matplotlib as mpl
-import math
 from matplotlib import pyplot as plt
-from cdpr.cdpr import CDPR
-from cdpr.utils import calc_static_workspace, create_grid_coordinates
-from typing import List, Union
 
 _linestyles = [
     ('solid', 'solid'),      # Same as (0, ()) or '-'
@@ -27,7 +24,7 @@ def _get_digits(x:float):
     digits = len(str(int(x)).replace("-",""))-1
     return digits
 
-def visualize_forces(cdpr:CDPR, pose, Ts, forces):
+def visualize_forces(cdpr, pose, Ts, forces):
     fig, ax = plt.subplots(constrained_layout=True, figsize = (6,2))
     m = cdpr.m
     cables_idx = cdpr.cables_idx
@@ -53,7 +50,7 @@ def visualize_forces(cdpr:CDPR, pose, Ts, forces):
     ax.legend(bbox_to_anchor=(1.2,0.5), fontsize = 12, loc="center right")
     return fig
 
-def visualize_velocities(cdpr:CDPR, pose, Ts, velocities, angular_velocities=None):
+def visualize_velocities(cdpr, pose, Ts, velocities, angular_velocities=None):
     fig, ax = plt.subplots(constrained_layout=True, figsize = (6,2))
     trans_axes = cdpr.trans_axes
     for i in range(cdpr.trans_dof):
@@ -61,9 +58,9 @@ def visualize_velocities(cdpr:CDPR, pose, Ts, velocities, angular_velocities=Non
         
     if angular_velocities is not None:
         ax1 = ax.twinx()
-        rot_axes = cdpr.rot_axes
+        rot_symbols = cdpr.pose_variables[-cdpr.rot_dof:]
         for j in range(cdpr.rot_dof):
-            ax1.plot(angular_velocities[:,i],ls=_linestyles[j+i][1], label=f"$\dot {rot_axes[j].rotation_symbol}$")
+            ax1.plot(angular_velocities[:,j],ls=_linestyles[j+i][1], label=f"$\dot {rot_symbols[j]}$")
         ax1.set_yticks(ax1.get_yticks())
         ax1.set_yticklabels(np.round(ax1.get_yticks(),3), fontsize = 12)
         ax1.set_ylabel("$\dot \phi$ [rad/s]$", fontsize = 12) 
@@ -83,7 +80,7 @@ def visualize_velocities(cdpr:CDPR, pose, Ts, velocities, angular_velocities=Non
     ax.legend(bbox_to_anchor=(1.2,0.5), fontsize = 12, loc="center right")
     return fig
     
-def visualize_poses(cdpr:CDPR, Ts, poses):
+def visualize_poses(cdpr, Ts, poses):
     fig, ax = plt.subplots(constrained_layout=True, figsize = (6,2))
     positions = poses[:,:cdpr.trans_dof]
     trans_axes = cdpr.trans_axes
@@ -94,9 +91,9 @@ def visualize_poses(cdpr:CDPR, Ts, poses):
     if cdpr.rot_dof>0:
         ax1 = ax.twinx()
         orientations = poses[:,-cdpr.rot_dof:]
-        rot_axes = cdpr.rot_axes
+        rot_symbols = cdpr.pose_variables[-cdpr.rot_dof:]
         for j in range(cdpr.rot_dof):
-            ax1.plot(orientations[:,i],ls=_linestyles[j+i][1], label=f"${rot_axes[j].rotation_symbol}$")
+            ax1.plot(orientations[:,j],ls=_linestyles[j+i][1], label=f"${rot_symbols[j]}$")
         ax1.set_yticks(ax1.get_yticks())
         ax1.set_yticklabels(np.round(ax1.get_yticks(),3), fontsize = 12)
         ax1.set_ylabel("$\phi$ [rad]$", fontsize = 12) 
@@ -117,7 +114,7 @@ def visualize_poses(cdpr:CDPR, Ts, poses):
     ax.legend(bbox_to_anchor=(1.2,0.5), fontsize = 12, loc="center right")
     return fig
 
-def visualize_tests_2D(cdpr:CDPR, successes, failures, timeouts):
+def visualize_tests_2D(cdpr, successes, failures, timeouts):
     fig = plt.figure(figsize=(8,4))
     ax = fig.add_subplot(111)
     axes_names = cdpr.axes_names

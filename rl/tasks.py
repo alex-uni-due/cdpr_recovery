@@ -19,10 +19,15 @@ class Task:
     
 def task_success(env):
     """success = env.v<=0.01"""
-    success = env.v<=0.01
+    success = env.v<=0.01 
     return success
 
-def task_pointmass_collision_failure(env):
+def task_success_body2D(env):
+    """success = env.v<=0.01"""
+    success = env.v<=0.01 and env.omega<=0.01
+    return success
+
+def task_collision_failure_pointmass(env):
     """failure = (
         env.r_p[0,0] >= env.y_max or
         env.r_p[0,0] <= env.y_min or 
@@ -41,18 +46,23 @@ def task_tilted_failure(env):
     failure = (env.phi<=env.phi_min or env.phi>=env.phi_max)
     return failure
 
-def task_body_2D_collision_failure(env):
+def task_collision_failure_body2D(env):
     corners = env.platform.corners
-    for i, corner1 in enumerate(corners):
-        corner2 = corners[(i+1)%len(corners)]
-        A = env.r_p + (env.R@corner1)
-        B = env.r_p + (env.R@corner2)
+    R = env.rotation_matrix
+    for i in range(corners.shape[1]):
+        corner1 = corners[:,[i]]
+        corner2 = corners[:,[(i+1)%len(corners)]]
+        A = env.r_p + (R@corner1)
+        B = env.r_p + (R@corner2)
         for border in env.borders:
             C = border[0]
             D = border[1]
             if intersect(A,B,C,D):
                 return True
     return False
+
+def task_body2D_failure(env):
+    return task_collision_failure_body2D(env) or task_tilted_failure(env)
 
 def task_timeout(env, n):
     """timeout = env.steps>n"""
@@ -61,10 +71,10 @@ def task_timeout(env, n):
     
 stop_pointmass_task = Task(
     task_success,
-    task_pointmass_collision_failure,
+    task_collision_failure_pointmass,
     task_timeout)
 
 stop_body2D_task = Task(
-    task_success,
-    task_body_2D_collision_failure,
+    task_success_body2D,
+    task_collision_failure_body2D,
     task_timeout)

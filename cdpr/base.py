@@ -1,5 +1,4 @@
 #%%
-import itertools
 import numpy as np
 from numpy import array
 from numpy.linalg import norm
@@ -154,15 +153,15 @@ class Body3D(Platform):
         
 class RotationalAxisX(RotationalAxis):
     def __init__(self) -> None:
-        super().__init__(name="x", rotation_symbol="PHI")
+        super().__init__(name="x", rotation_symbol=r"\varphi")
 
 class RotationalAxisY(RotationalAxis):
     def __init__(self) -> None:
-        super().__init__(name="y", rotation_symbol="THETA")
+        super().__init__(name="y", rotation_symbol="r\theta")
 
 class RotationalAxisZ(RotationalAxis):
     def __init__(self) -> None:
-        super().__init__(name="z", rotation_symbol="PSI")
+        super().__init__(name="z", rotation_symbol="r\psi")
 
 class TranslationalAxisX(TranslationalAxis):
     def __init__(self, min:float, max:float) -> None:
@@ -260,15 +259,6 @@ class CDPR(ABC):
         self.r = self.m - self.n # redundancy
         self.cdpr_type = f"{self.rot_dof}R{self.trans_dof}T"
         self.axes = np.zeros((self.trans_dof,2))
-        if trans_dof==2:
-            self.borders = [[array([self.axes[0,0], self.axes[1,0]]),
-                            array([self.axes[0,0], self.axes[1,1]])],
-                            [array([self.axes[0,0], self.axes[1,1]]),
-                            array([self.axes[0,1], self.axes[1,1]])],
-                            [array([self.axes[0,1], self.axes[1,1]]),
-                            array([self.axes[0,1], self.axes[1,0]])],
-                            [array([self.axes[0,1], self.axes[1,0]]),
-                            array([self.axes[0,0], self.axes[1,0]])]]
         if trans_dof>1:
             self.axes[0,0] = getattr(self, self.trans_axes[0]+"_min")
             self.axes[1,0] = getattr(self, self.trans_axes[1]+"_min")
@@ -280,7 +270,15 @@ class CDPR(ABC):
             self.e_max = norm(self.axes[:,1]-self.axes[:,0])
         for key, value in kwargs.items():
             setattr(self, key, value)
-    
+        if trans_dof==2:
+            self.borders = [[array([self.axes[0,0], self.axes[1,0]]),
+                            array([self.axes[0,0], self.axes[1,1]])],
+                            [array([self.axes[0,0], self.axes[1,1]]),
+                            array([self.axes[0,1], self.axes[1,1]])],
+                            [array([self.axes[0,1], self.axes[1,1]]),
+                            array([self.axes[0,1], self.axes[1,0]])],
+                            [array([self.axes[0,1], self.axes[1,0]]),
+                            array([self.axes[0,0], self.axes[1,0]])]]
     @property
     def platform_attachment_points(self):
         return self.P

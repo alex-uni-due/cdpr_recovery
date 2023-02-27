@@ -7,7 +7,7 @@ from typing import Union, List, Optional, Callable
 from qpsolvers import solve_qp
 from scipy.optimize import minimize
 from scipy.optimize import linprog
-from environment.environment import EmergencyStrategyCDPR
+from rl.environment import EmergencyStrategyCDPR
 from cdpr.utils import normalize, rescale, quadprog, nearest_corner
 from collections import namedtuple
 from dataclasses import dataclass, field

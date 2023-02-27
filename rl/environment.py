@@ -4,9 +4,9 @@ import numpy as np
 from numpy import array
 from numpy.linalg import norm
 from cdpr.cdpr import *
-from environment.rewards import *
-from environment.observations import *
-from environment.actions import *
+from .rewards import *
+from .observations import *
+from .actions import *
 from cdpr.utils import *
 #%%
 class Task:
@@ -25,55 +25,84 @@ class Task:
         return str(self.__dict__)
 #%%
 class EmergencyStrategyCDPR(Env):
-    ## Properties
-    #State
-    spatial_velocity = property(lambda self: self.pose_dot)
-    spatial_acceleration = property(lambda self: self.pose_dot_dot)
-    cable_lengths = property(lambda self: self.a)
-    structure_matrix = property(lambda self: self.get_structure_matrix())
-    rotation_matrix = property(lambda self: self.get_rotmat())
-    q = property(lambda self: self.get_cable_lenghts())
-    cable_lengths = property(lambda self: self.q)
+    #%% Properties
+    @property
+    def spatial_velocity(self): return self.pose_dot
+    @property
+    def spatial_acceleration(self): return self.pose_dot_dot
+    @property
+    def cable_lengths(self): return self.a
+    @property
+    def structure_matrix(self): return self.get_structure_matrix()
+    @property
+    def rotation_matrix(self): return self.get_rotmat()
+    @property
+    def q(self): return self.get_cable_lenghts()
+    @property
+    def cable_lengths(self): return self.q
+    @property
+    def r_p(self): return self.pose[:self.trans_dof]
+    @property
+    def position(self): return self.r_p
+    @property
+    def r_p_dot(self): return self.pose[:self.trans_dof]
+    @property
+    def velocity_vector(self): return self.r_p_dot
+    @property
+    def r_p_dot_dot(self): return self.pose_dot_dot[:self.trans_dof]
+    @property
+    def acceleration_vector(self): return self.r_p_dot_dot
+    @property
+    def v(self): return norm(self.r_p_dot)
+    @property
+    def velocity(self): return self.v
+    @property
+    def a(self): return norm(self.r_p_dot_dot)
+    @property
+    def acceleration(self): return self.a
+    @property
+    def phi(self): return self.pose[-self.rot_dof:]
+    @property
+    def phi_dot(self): return self.pose_dot[-self.rot_dof:]
+    @property
+    def phi_dot_dot(self): return self.pose_dot_dot[-self.rot_dof:]
+    @property
+    def omega(self): return norm(self.phi_dot)
+    @property
+    def alpha(self): return norm(self.phi_dot_dot)
+    @property
+    def orientation(self): return self.phi
+    @property
+    def angular_velocity(self): return self.omega
+    @property
+    def angular_velocity_vector(self): return self.phi_dot
+    @property
+    def angular_acceleration(self): return self.omega_dot
+    @property
+    def angular_acceleration_vector(self): return self.phi_dot_dot
+    @property
+    def cable_forces(self): return self.f
+    @property
+    def cable_force_gradients(self): return self.del_ta_f
+    @property
+    def wrench_external(self): return self.w_e
+    @property
+    def M_inv(self): return self.calc_mass_matrix_inverse()
+    @property
+    def M(self): return self.calc_mass_matrix()
     
-    r_p = property(lambda self: self.pose[:self.trans_dof])
-    position = property(lambda self: self.r_p)
-    r_p_dot = property(lambda self: self.pose[:self.trans_dof])
-    velocity_vector = property(lambda self: self.r_p_dot)
-    r_p_dot_dot = property(lambda self: self.pose_dot_dot[:self.trans_dof])
-    acceleration_vector = property(lambda self: self.r_p_dot_dot)
-    v = property(lambda self: norm(self.r_p_dot))
-    velocity = property(lambda self: self.v)
-    a = property(lambda self: norm(self.r_p_dot_dot))
-    acceleration = property(lambda self: self.a)
-     
-    phi = property(lambda self: self.pose[-self.rot_dof:])
-    phi_dot = property(lambda self: self.pose_dot[-self.rot_dof:])
-    phi_dot_dot = property(lambda self: self.pose_dot_dot[-self.rot_dof:])
-    omega = property(lambda self: norm(self.phi_dot))
-    alpha = property(lambda self: norm(self.phi_dot_dot))
-    orientation = property(lambda self: self.phi)
-    angular_velocity = property(lambda self: self.omega)
-    angular_velocity_vector = property(lambda self: self.phi_dot)
-    angular_acceleration = property(lambda self: self.omega_dot)
-    angular_acceleration_vector = property(lambda self: self.phi_dot_dot)
-    
-    cable_forces = property(lambda self: self.f)
-    cable_force_gradients = property(lambda self: self.delta_f)
-    # wrench = property(lambda self: self.w)
-    wrench_external = property(lambda self: self.w_e)
-    
-    M_inv = property(lambda self: self.calc_mass_matrix_inverse())
-    M = property(lambda self: self.calc_mass_matrix())
-    
+    #%%
     def __init__(self, 
                  cdpr: CDPR,
                  cables_idx: List[int], # list of cables indeces to be used in simulation
                  Ts: float, # timestep intervall
+                 max_episode_timesteps: int,
                  coordinates: np.ndarray, # coordinate grid for workspace calculation and initialization
                  observation: Observation,
                  action: Action, # action function
                  reward: Reward, # reward function
                  task: Task,
+                 rew_params:Dict[str,float] = {},
                  **kwargs
                 ) -> None:
                        
@@ -88,6 +117,7 @@ class EmergencyStrategyCDPR(Env):
         else:
             self.p = self.P[:,self.cables_idx] # remaining anchor points
         self.Ts = Ts # timestep
+        self.max_episode_timesteps = max_episode_timesteps
         self.coordinates = coordinates
         self.ws_full, self.ws_full_forces = calc_static_workspace(self, coordinates, self.default_cables_idx)
         self.ws_rem, self.ws_rem_forces = calc_static_workspace(self, coordinates, self.cables_idx)
@@ -96,47 +126,59 @@ class EmergencyStrategyCDPR(Env):
         for arg_name, arg_value in kwargs.items():
             setattr(self, arg_name, arg_value)
         
-        if self.trans_dof==0:
-            del self.r_p
-            del self.r_p_dot
-            del self.r_p_dot_dot
-            del self.v
-            del self.a
-            del self.position
-            del self.velocity
-            del self.velocity_vector
-            del self.acceleration
-            del self.acceleration_vector
-            
-        if self.rot_dof==0:
-            del self.phi
-            del self.phi_dot
-            del self.phi_dot_dot
-            del self.omega 
-            del self.alpha
-            del self.orientation
-            del self.angular_velocity
-            del self.acceleration_vector
-            del self.angular_acceleration
-            del self.angular_acceleration_vector
-            del self.R
-            del self.rotation_matrix
-            
         # Observation Space
         self.obs = observation
         self._add_obs_limits()
-        self.get_obs = lambda: observation.func(self)
+        # self.get_obs = lambda: observation.func(self)
         self.observation_space = observation.observation_space
         
         self.act = action
-        self.get_cable_foces = lambda act: action.func(self, act)
-        self.action_space = action.action_space(self)
+        # self.get_cable_forces = lambda act: action.func(self, act)
+        if callable(action.action_space):
+            self.action_space = action.action_space(self)
+        else:
+            self.action_space = action.action_space
         self.rew = reward
-        self.get_reward = lambda: reward.func(self)
+        self.rew_params = rew_params
+        # self.get_reward = lambda: reward.func(self)
         self.task = task
-        self.is_success = lambda: task.is_success(self)
-        self.is_failure = lambda: task.is_failure(self)
-        self.is_timeout = lambda: task.is_timeout(self)
+        # self.is_success = lambda: task.is_success(self)
+        # self.is_failure = lambda: task.is_failure(self)
+        # self.is_timeout = lambda: task.is_timeout(self)
+    
+    def get_obs(self):
+        return self.obs.func(self)
+    
+    def get_cable_forces(self, action):
+        return self.act.func(self,action)
+    
+    def get_reward(self):
+        return self.rew.func(self, **self.rew_params)
+            
+    def set_rew(self, reward:Reward):
+        self.rew = reward
+    def set_rew_params(self, params):
+        self.rew_params = params
+    def set_act(self, action:Action):
+        self.act = action
+        self.action_space = action.action_space(self)
+        
+    def set_obs(self, observation:Observation):
+        self.obs = observation
+        self._add_obs_limits()
+        self.observation_space = observation.observation_space
+        
+    def set_task(self, task:Task):
+        self.task = task
+            
+    def is_success(self):
+        return self.task.is_success(self)
+    
+    def is_failure(self):
+        return self.task.is_failure(self)
+    
+    def is_timeout(self):
+        return self.task.is_timeout(self,self.max_episode_timesteps)
     
     def _add_obs_limits(self):
         """Adds limits variable names and their limits as attributes"""
@@ -145,17 +187,21 @@ class EmergencyStrategyCDPR(Env):
         i = 0
         for var in self.obs.variables:
             if var.dtype==float or var.dtype==int:
-                var_min = low[i]
-                var_max = high[i]
-                setattr(self, f"{var.symbol}_min", var_min)
-                setattr(self, f"{var.symbol}_max", var_max)
+                if not hasattr(self,f"{var.symbol}_min"):
+                    var_min = low[i]
+                    setattr(self, f"{var.symbol}_min", var_min)
+                if not hasattr(self,f"{var.symbol}_max"):
+                    var_max = high[i]
+                    setattr(self, f"{var.symbol}_max", var_max)
                 i +=1
             elif var.dtype==np.ndarray:
                 size = getattr(self, var.size)
-                var_min = low[i:size]
-                var_max = high[i:size]
-                setattr(self, f"{var.symbol}_min", var_min)
-                setattr(self, f"{var.symbol}_max", var_max)
+                if not hasattr(self,f"{var.symbol}_min"):
+                    var_min = low[i:size]
+                    setattr(self, f"{var.symbol}_min", var_min)
+                if not hasattr(self,f"{var.symbol}_max"):    
+                    var_max = high[i:size]
+                    setattr(self, f"{var.symbol}_max", var_max)
                 i+=size
                 
     # Function for accessing cdpr attrs        
@@ -174,24 +220,6 @@ class EmergencyStrategyCDPR(Env):
     def get_ode(self):
         return self.CDPR.calc_ode(self.M_inv, self.AT, self.f, self.w_e)
     
-    def set_action(self, action:Action):
-        self.get_cable_foces = lambda act: action.func(self, act)
-        self.action_space = action.action_space(self)
-        
-    def set_observation(self, observation:Observation):
-        self.obs = observation
-        self._add_obs_limits()
-        self.get_obs = lambda: observation.func(self)
-        self.observation_space = observation.observation_space
-        
-    def set_reward(self, reward:Reward):
-        self.get_reward = lambda: reward.func(self)
-        
-    def set_task(self, task:Task):
-        self.is_success = lambda: task.is_success(self)
-        self.is_failure = lambda: task.is_failure(self)
-        self.is_timeout = lambda: task.is_timeout(self)
-        
     ## Apply action to environment and observe new state and reward
     def step(self, action):
         self.steps += 1
@@ -204,28 +232,28 @@ class EmergencyStrategyCDPR(Env):
         self.f_prev = self.f
         
         # Update states and actions
-        self.f = self.get_cable_foces(action)
+        self.f = self.get_cable_forces(action)
         self.delta_f = self.f - self.f_prev
         self.action = action
-        self.pose_dot_dot = self.get_ode()
+        self.pose_dot_dot = self.CDPR.calc_ode(self.M_inv, self.AT, self.f, self.w_e)
         self.pose_dot = euler_cromer(self.pose_dot, self.pose_dot_dot, self.Ts)
         self.pose = euler_cromer(self.pose, self.pose_dot, self.Ts)
-        self.AT = self.get_structure_matrix()
+        self.AT = self.calc_structure_matrix(self.pose, self.b, self.p)
         
         # Get transition info
         self.state = self.get_obs()
+        self.success = self.is_success()
+        self.failure = self.is_failure()
+        self.timeout = self.is_timeout()
         self.done = self.get_done()
         self.reward = self.get_reward()
         self.info = {"is_success": self.success}
         return self.state, self.reward, self.done, self.info
 
     def get_done(self):
-        self.success = self.is_success()
-        self.failure = self.is_failure()
-        self.timeout = self.is_timeout()
         return self.success or self.failure or self.timeout
     
-    def get_state(self):
+    def get_rescaled_state(self):
         state = []
         for i, var in enumerate(self.state):
             var_min = self.obs.low[i]
@@ -235,6 +263,11 @@ class EmergencyStrategyCDPR(Env):
         state = array(state)
         return state
     
+    def seed(self, seed):
+        np.random.seed(seed)
+        self.observation_space.seed(seed)
+        self.action_space.seed(seed)
+        
     def reset(self,pose = None, 
               pose_dot = None, 
               pose_dot_dot=None, 
@@ -243,6 +276,7 @@ class EmergencyStrategyCDPR(Env):
         if pose is None:
            start_idx = np.random.randint(0, self.ws_full.shape[0])
            pose = (self.ws_full[start_idx]).reshape(self.n,1).astype(np.float32)
+           
         if pose_dot is None:
             pose_dot = np.zeros((self.n,1))
         if pose_dot_dot is None:
@@ -264,7 +298,6 @@ class EmergencyStrategyCDPR(Env):
         
         AT = self.calc_structure_matrix(pose,self.B, self.P)
         self.AT = AT[:,self.cables_idx] 
-        
         if f is None:
             self.f_0 = (quadprog(AT,self.w_e, self.f_min, self.f_max)[self.cables_idx]).reshape(self.m, 1)
         else:
