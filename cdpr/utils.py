@@ -6,7 +6,8 @@ from numpy.linalg import norm, matrix_rank, svd, pinv
 from scipy.optimize import linprog as lp
 from qpsolvers import solve_qp
 from typing import Union,  Literal, List #, Sequence
-from cdpr.cdpr import CDPR
+from .base import CDPR
+
 def intersect(A:np.ndarray,B:np.ndarray,C:np.ndarray,D:np.ndarray)->bool:
     """Check for intersection of line AB with line CD
 
